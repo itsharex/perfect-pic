@@ -31,7 +31,7 @@ func (h *ImageHandler) UploadImage(c *gin.Context) {
 		return
 	}
 
-	imageRecord, url, err := h.imageUseCase.ProcessImageUpload(file, uid)
+	imageRecord, url, err := h.imageService.ProcessImageUpload(file, uid)
 	if err != nil {
 		if _, ok := platformservice.AsServiceError(err); !ok {
 			log.Printf("Upload failed: %v", err)
@@ -53,12 +53,20 @@ func (h *ImageHandler) GetMyImages(c *gin.Context) {
 	pageStr := c.DefaultQuery("page", "1")
 	pageSizeStr := c.DefaultQuery("page_size", "10")
 	filename := c.Query("filename")
+	if len(filename) > 255 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "filename 参数过长"})
+		return
+	}
 	idStr := c.Query("id")
 
-	page, _ := strconv.Atoi(pageStr)
-	pageSize, _ := strconv.Atoi(pageSizeStr)
-	if page < 1 {
+	page, err := strconv.Atoi(pageStr)
+	if err != nil || page < 1 {
 		page = 1
+	}
+	pageSize, err := strconv.Atoi(pageSizeStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "page_size 参数格式错误"})
+		return
 	}
 	if pageSize < 1 {
 		pageSize = 10
