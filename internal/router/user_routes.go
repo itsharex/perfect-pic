@@ -13,12 +13,19 @@ func registerUserRoutes(
 	userHandler *handler.UserHandler,
 	imageHandler *handler.ImageHandler,
 	authMiddleware *middleware.AuthMiddleware,
+	csrfMiddleware *middleware.CSRFMiddleware,
 	bodyLimitMiddleware *middleware.BodyLimitMiddleware,
 	rateLimitMiddleware *middleware.RateLimitMiddleware,
 ) {
 	userGroup := api.Group("/user")
 	userGroup.Use(authMiddleware.JWTAuth())
 	userGroup.Use(authMiddleware.UserStatusCheck())
+
+	// Logout 豁免 CSRF 检查：如果 XSRF-TOKEN Cookie 丢失但 jwt_token 仍在，
+	// 用户应仍能通过 logout 接口清除 JWT Cookie，避免"无法登出"的死锁。
+	userGroup.POST("/logout", userHandler.Logout)
+
+	userGroup.Use(csrfMiddleware.CSRFCheck())
 	bodyLimit := bodyLimitMiddleware.BodyLimitMiddleware()
 
 	// 修改用户名请求间隔：读取配置（秒）
@@ -29,6 +36,9 @@ func registerUserRoutes(
 	uploadLimiter := rateLimitMiddleware.RateLimit(consts.ConfigRateLimitUploadRPS, consts.ConfigRateLimitUploadBurst)
 	uploadBodyLimit := bodyLimitMiddleware.UploadBodyLimitMiddleware()
 
+	// 修改密码请求间隔：读取配置（秒）
+	passwordLimiter := rateLimitMiddleware.IntervalRate(consts.ConfigRateLimitTokenVerifyIntervalSeconds)
+
 	userGroup.GET("/profile", userHandler.GetSelfInfo)
 	userGroup.GET("/passkeys", userHandler.ListSelfPasskeys)
 	userGroup.DELETE("/passkeys/:id", userHandler.DeleteSelfPasskey)
@@ -36,7 +46,7 @@ func registerUserRoutes(
 	userGroup.POST("/passkeys/register/start", bodyLimit, userHandler.BeginPasskeyRegistration)
 	userGroup.POST("/passkeys/register/finish", bodyLimit, userHandler.FinishPasskeyRegistration)
 	userGroup.PATCH("/username", bodyLimit, usernameLimiter, userHandler.UpdateSelfUsername)
-	userGroup.PATCH("/password", bodyLimit, userHandler.UpdateSelfPassword)
+	userGroup.PATCH("/password", bodyLimit, passwordLimiter, userHandler.UpdateSelfPassword)
 	userGroup.POST("/email", bodyLimit, emailLimiter, userHandler.RequestUpdateEmail)
 
 	userGroup.PATCH("/avatar", uploadBodyLimit, uploadLimiter, userHandler.UpdateSelfAvatar)
