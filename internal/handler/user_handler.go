@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"perfect-pic-server/internal/common/httpx"
 	moduledto "perfect-pic-server/internal/dto"
+	"perfect-pic-server/internal/pkg/csrf"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -54,16 +56,18 @@ func (h *UserHandler) UpdateSelfUsername(c *gin.Context) {
 		return
 	}
 
-	token, err := h.userUseCase.UpdateUsernameAndGenerateToken(uid, req.Username)
+	token, err := h.userService.UpdateUsernameAndGenerateToken(uid, req.Username)
 	if err != nil {
 		httpx.WriteServiceError(c, err, "更新失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "用户名更新成功",
-		"token":   token,
-	})
+	if err := h.setAuthCookies(c, token); err != nil {
+		httpx.WriteServiceError(c, err, "更新失败")
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "用户名更新成功"})
 }
 
 // UpdateSelfPassword 修改自己的密码
@@ -86,7 +90,7 @@ func (h *UserHandler) UpdateSelfPassword(c *gin.Context) {
 		return
 	}
 
-	err := h.userUseCase.UpdatePasswordByOldPassword(uid, req.OldPassword, req.NewPassword)
+	err := h.userService.UpdatePasswordByOldPassword(uid, req.OldPassword, req.NewPassword)
 	if err != nil {
 		httpx.WriteServiceError(c, err, "更新失败")
 		return
@@ -114,7 +118,7 @@ func (h *UserHandler) RequestUpdateEmail(c *gin.Context) {
 		return
 	}
 
-	err := h.userUseCase.RequestEmailChange(uid, req.Password, req.NewEmail)
+	err := h.userService.RequestEmailChange(uid, req.Password, req.NewEmail)
 	if err != nil {
 		httpx.WriteServiceError(c, err, "生成验证链接失败")
 		return
@@ -136,12 +140,6 @@ func (h *UserHandler) UpdateSelfAvatar(c *gin.Context) {
 		return
 	}
 
-	valid, ext, err := h.imageService.ValidateImageFile(file)
-	if !valid {
-		httpx.WriteServiceError(c, err, "头像文件校验失败")
-		return
-	}
-	_ = ext
 	uid, ok := userId.(uint)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "获取用户ID失败"})
@@ -154,7 +152,7 @@ func (h *UserHandler) UpdateSelfAvatar(c *gin.Context) {
 		return
 	}
 
-	newFilename, err := h.imageUseCase.UpdateUserAvatar(user, file)
+	newFilename, err := h.imageService.UpdateUserAvatar(user, file)
 	if err != nil {
 		log.Printf("UpdateUserAvatar error: %v", err)
 		httpx.WriteServiceError(c, err, "头像更新失败")
@@ -202,7 +200,7 @@ func (h *UserHandler) BeginPasskeyRegistration(c *gin.Context) {
 		return
 	}
 
-	sessionID, creation, err := h.passkeyUseCase.BeginPasskeyRegistration(uid)
+	sessionID, creation, err := h.passkeyService.BeginPasskeyRegistration(uid)
 	if err != nil {
 		httpx.WriteServiceError(c, err, "创建 Passkey 注册挑战失败")
 		return
@@ -234,7 +232,7 @@ func (h *UserHandler) FinishPasskeyRegistration(c *gin.Context) {
 		return
 	}
 
-	if err := h.passkeyUseCase.FinishPasskeyRegistration(uid, req.SessionID, req.Credential); err != nil {
+	if err := h.passkeyService.FinishPasskeyRegistration(uid, req.SessionID, req.Credential); err != nil {
 		httpx.WriteServiceError(c, err, "Passkey 绑定失败")
 		return
 	}
@@ -327,4 +325,24 @@ func (h *UserHandler) UpdateSelfPasskeyName(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Passkey 名称更新成功"})
+}
+
+// Logout 清除认证Cookie并登出。
+func (h *UserHandler) Logout(c *gin.Context) {
+	httpx.ClearJWTCookie(c)
+	httpx.ClearCSRFCookie(c)
+	c.JSON(http.StatusOK, gin.H{"message": "已登出"})
+}
+
+// setAuthCookies 生成CSRF Token并同时设置JWT Cookie和CSRF Cookie。
+func (h *UserHandler) setAuthCookies(c *gin.Context, jwtToken string) error {
+	csrfToken, err := csrf.GenerateToken()
+	if err != nil {
+		return err
+	}
+	maxAge := time.Duration(h.staticConfig.JWT.ExpirationHours) * time.Hour
+	secure := h.staticConfig.Server.Mode == "release"
+	httpx.SetJWTCookie(c, jwtToken, maxAge, secure)
+	httpx.SetCSRFCookie(c, csrfToken, maxAge, secure)
+	return nil
 }

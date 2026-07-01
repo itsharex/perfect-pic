@@ -16,13 +16,21 @@ func (h *UserHandler) GetUserList(c *gin.Context) {
 	pageStr := c.DefaultQuery("page", "1")
 	pageSizeStr := c.DefaultQuery("page_size", "10")
 	keyword := c.Query("keyword")
+	if len(keyword) > 255 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "keyword 参数过长"})
+		return
+	}
 	showDeleted := c.DefaultQuery("show_deleted", "false")
 	order := c.Query("order")
 
-	page, _ := strconv.Atoi(pageStr)
-	pageSize, _ := strconv.Atoi(pageSizeStr)
-	if page < 1 {
+	page, err := strconv.Atoi(pageStr)
+	if err != nil || page < 1 {
 		page = 1
+	}
+	pageSize, err := strconv.Atoi(pageSizeStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "page_size 参数格式错误"})
+		return
 	}
 	if pageSize < 1 {
 		pageSize = 10
@@ -98,7 +106,7 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 		return
 	}
 
-	if err := h.userManageUseCase.UpdateUser(uint(id), req); err != nil {
+	if err := h.userService.UpdateUserAdmin(uint(id), req); err != nil {
 		httpx.WriteServiceError(c, err, "更新用户失败")
 		return
 	}
@@ -123,20 +131,13 @@ func (h *UserHandler) UpdateUserAvatar(c *gin.Context) {
 		return
 	}
 
-	valid, ext, err := h.imageService.ValidateImageFile(file)
-	if !valid {
-		httpx.WriteServiceError(c, err, "头像文件校验失败")
-		return
-	}
-	_ = ext
-
 	user, err := h.userService.GetUserByID(uint(id), true)
 	if err != nil {
 		httpx.WriteServiceError(c, err, "获取用户失败")
 		return
 	}
 
-	newFilename, err := h.imageUseCase.UpdateUserAvatar(user, file)
+	newFilename, err := h.imageService.UpdateUserAvatar(user, file)
 	if err != nil {
 		log.Printf("Admin UpdateUserAvatar error: %v", err)
 		httpx.WriteServiceError(c, err, "头像更新失败")
@@ -161,7 +162,7 @@ func (h *UserHandler) RemoveUserAvatar(c *gin.Context) {
 		return
 	}
 
-	if err := h.imageUseCase.RemoveUserAvatar(user); err != nil {
+	if err := h.imageService.RemoveUserAvatar(user); err != nil {
 		log.Printf("Admin RemoveUserAvatar error: %v", err)
 		httpx.WriteServiceError(c, err, "头像移除失败")
 		return
@@ -196,7 +197,7 @@ func (h *UserHandler) DeleteUser(c *gin.Context) {
 
 	hardDelete := c.DefaultQuery("hard_delete", "false")
 
-	if err := h.userManageUseCase.AdminDeleteUser(uint(id), hardDelete == "true"); err != nil {
+	if err := h.userService.AdminDeleteUser(uint(id), hardDelete == "true"); err != nil {
 		httpx.WriteServiceError(c, err, "删除用户失败")
 		return
 	}
