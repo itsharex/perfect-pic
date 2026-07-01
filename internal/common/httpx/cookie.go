@@ -54,10 +54,10 @@ func SetCSRFCookie(c *gin.Context, token string, maxAge time.Duration, secure bo
 
 // ClearJWTCookie 清除JWT认证Cookie。
 func ClearJWTCookie(c *gin.Context) {
-	c.SetCookie(JWTCookieName, "", -1, "/", "", false, true)
+	c.SetCookie(JWTCookieName, "", -1, "/", "", true, true)
 }
 
 // ClearCSRFCookie 清除CSRF Token Cookie。
 func ClearCSRFCookie(c *gin.Context) {
-	c.SetCookie(CSRFCookieName, "", -1, "/", "", false, false)
+	c.SetCookie(CSRFCookieName, "", -1, "/", "", true, false)
 }
